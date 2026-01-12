@@ -14,18 +14,22 @@ import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
-import javax.lang.model.element.AnnotationMirror;
-import javax.lang.model.element.AnnotationValue;
-import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
 import javax.tools.Diagnostic;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
- * Annotation processor that generates {ClassName}_I interface with field symbols and fluent methods.
+ * Annotation processor that generates {ClassName}_I interface with MapLike-based property accessors.
+ *
+ * Generated code includes:
+ * - Field symbols ($fieldName constants)
+ * - Fluent getters and setters
+ * - 8 property accessor methods for DataHelper_I delegation
+ * - FIELDS list (immutable)
  */
 @AutoService(Processor.class)
 @SupportedAnnotationTypes("xyz.jphil.datahelper.DataHelper")
@@ -51,22 +55,67 @@ public class DataHelperProcessor extends AbstractProcessor {
         String className = element.getSimpleName().toString();
         String interfaceName = className + "_I";
 
-        // Extract property annotations and super interfaces from the @DataHelper annotation
-        List<ClassName> propertyAnnotations = extractPropertyAnnotations(element);
-        List<TypeName> superInterfaces = extractSuperInterfaces(element);
-
         // Collect all non-static, non-final fields
         List<FieldInfo> fields = new ArrayList<>();
+        boolean hasErrors = false;
+
         for (Element enclosedElement : element.getEnclosedElements()) {
             if (enclosedElement.getKind() == ElementKind.FIELD) {
                 Set<Modifier> modifiers = enclosedElement.getModifiers();
                 if (!modifiers.contains(Modifier.STATIC) && !modifiers.contains(Modifier.FINAL)) {
                     VariableElement field = (VariableElement) enclosedElement;
                     String fieldName = field.getSimpleName().toString();
-                    TypeName fieldType = TypeName.get(field.asType());
-                    fields.add(new FieldInfo(fieldName, fieldType));
+                    TypeMirror fieldTypeMirror = field.asType();
+                    TypeName fieldType = TypeName.get(fieldTypeMirror);
+
+                    // Analyze field type
+                    boolean isListField = isListType(fieldTypeMirror);
+                    boolean isNestedDataHelper = isDataHelperType(fieldTypeMirror);
+                    TypeName listElementType = isListField ? getListElementType(fieldTypeMirror) : null;
+                    boolean isListOfDataHelper = isListField && listElementType != null && isDataHelperType(getListElementTypeMirror(fieldTypeMirror));
+
+                    // Validate field type is supported
+                    if (!isListField && !isNestedDataHelper && !isSupportedSimpleType(fieldTypeMirror)) {
+                        processingEnv.getMessager().printMessage(
+                            Diagnostic.Kind.ERROR,
+                            String.format(
+                                "Field '%s' has unsupported type '%s'. " +
+                                "Supported types are: primitives, boxed primitives, String, @DataHelper annotated types, " +
+                                "types implementing DataHelper_I, and List<> of these types.",
+                                fieldName,
+                                fieldTypeMirror
+                            ),
+                            field
+                        );
+                        hasErrors = true;
+                    }
+
+                    // Validate List element type if it's a list
+                    if (isListField && !isListOfDataHelper && listElementType != null) {
+                        TypeMirror elementTypeMirror = getListElementTypeMirror(fieldTypeMirror);
+                        if (!isSupportedSimpleType(elementTypeMirror)) {
+                            processingEnv.getMessager().printMessage(
+                                Diagnostic.Kind.ERROR,
+                                String.format(
+                                    "Field '%s' is a List with unsupported element type '%s'. " +
+                                    "List elements must be: primitives, boxed primitives, String, or @DataHelper types.",
+                                    fieldName,
+                                    elementTypeMirror
+                                ),
+                                field
+                            );
+                            hasErrors = true;
+                        }
+                    }
+
+                    fields.add(new FieldInfo(fieldName, fieldType, isListField, isNestedDataHelper, isListOfDataHelper, listElementType));
                 }
             }
+        }
+
+        // If there were validation errors, stop processing
+        if (hasErrors) {
+            return;
         }
 
         // Build the interface
@@ -84,11 +133,6 @@ public class DataHelperProcessor extends AbstractProcessor {
                 TypeVariableName.get("E")
         ));
 
-        // Add super interfaces if specified
-        for (TypeName superInterface : superInterfaces) {
-            interfaceBuilder.addSuperinterface(superInterface);
-        }
-
         // Add field symbols
         for (FieldInfo field : fields) {
             String symbolName = "$" + field.name;
@@ -98,7 +142,7 @@ public class DataHelperProcessor extends AbstractProcessor {
             interfaceBuilder.addField(symbol);
         }
 
-        // Add FIELDS list
+        // Add immutable FIELDS list
         CodeBlock.Builder fieldsListInitBuilder = CodeBlock.builder().add("$T.of(", List.class);
         for (int i = 0; i < fields.size(); i++) {
             if (i > 0) {
@@ -109,7 +153,7 @@ public class DataHelperProcessor extends AbstractProcessor {
         fieldsListInitBuilder.add(")");
 
         FieldSpec fieldsListField = FieldSpec.builder(
-                ParameterizedTypeName.get(List.class, String.class),
+                ParameterizedTypeName.get(ClassName.get(List.class), ClassName.get(String.class)),
                 "FIELDS",
                 Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
                 .initializer(fieldsListInitBuilder.build())
@@ -119,31 +163,21 @@ public class DataHelperProcessor extends AbstractProcessor {
         // Add verbose getter declarations
         for (FieldInfo field : fields) {
             String getterName = "get" + capitalize(field.name);
-            MethodSpec.Builder getterBuilder = MethodSpec.methodBuilder(getterName)
+            MethodSpec getter = MethodSpec.methodBuilder(getterName)
                     .addModifiers(Modifier.PUBLIC, Modifier.ABSTRACT)
-                    .returns(field.type);
-
-            // Add property annotations to verbose getter
-            for (ClassName annotation : propertyAnnotations) {
-                getterBuilder.addAnnotation(annotation);
-            }
-
-            interfaceBuilder.addMethod(getterBuilder.build());
+                    .returns(field.type)
+                    .build();
+            interfaceBuilder.addMethod(getter);
         }
 
         // Add verbose setter declarations
         for (FieldInfo field : fields) {
             String setterName = "set" + capitalize(field.name);
-            MethodSpec.Builder setterBuilder = MethodSpec.methodBuilder(setterName)
+            MethodSpec setter = MethodSpec.methodBuilder(setterName)
                     .addModifiers(Modifier.PUBLIC, Modifier.ABSTRACT)
-                    .addParameter(field.type, field.name);
-
-            // Add property annotations to verbose setter
-            for (ClassName annotation : propertyAnnotations) {
-                setterBuilder.addAnnotation(annotation);
-            }
-
-            interfaceBuilder.addMethod(setterBuilder.build());
+                    .addParameter(field.type, field.name)
+                    .build();
+            interfaceBuilder.addMethod(setter);
         }
 
         // Add fluent getter defaults
@@ -173,113 +207,203 @@ public class DataHelperProcessor extends AbstractProcessor {
             interfaceBuilder.addMethod(fluentSetter);
         }
 
-        // Add toMap() method
-        MethodSpec.Builder toMapBuilder = MethodSpec.methodBuilder("toMap")
+        // ========== Property Accessor Methods (8 methods for delegation) ==========
+
+        // 1. fieldNames()
+        MethodSpec fieldNamesMethod = MethodSpec.methodBuilder("fieldNames")
                 .addModifiers(Modifier.PUBLIC, Modifier.DEFAULT)
+                .addAnnotation(Override.class)
+                .returns(ParameterizedTypeName.get(ClassName.get(List.class), ClassName.get(String.class)))
+                .addStatement("return FIELDS")
+                .build();
+        interfaceBuilder.addMethod(fieldNamesMethod);
+
+        // 2. getPropertyByName(String)
+        MethodSpec.Builder getPropertyByNameBuilder = MethodSpec.methodBuilder("getPropertyByName")
+                .addModifiers(Modifier.PUBLIC, Modifier.DEFAULT)
+                .addAnnotation(Override.class)
+                .addParameter(String.class, "propertyName")
+                .returns(Object.class);
+
+        if (fields.isEmpty()) {
+            getPropertyByNameBuilder.addStatement("return null");
+        } else {
+            // Build switch expression as a statement (with semicolon)
+            CodeBlock.Builder switchBlock = CodeBlock.builder();
+            switchBlock.add("return switch (propertyName) {\n");
+            switchBlock.indent();
+            for (FieldInfo field : fields) {
+                String getterName = "get" + capitalize(field.name);
+                switchBlock.add("case $N -> $N();\n", "$" + field.name, getterName);
+            }
+            switchBlock.add("default -> null;\n");
+            switchBlock.unindent();
+            switchBlock.add("};");  // Semicolon AFTER closing brace!
+            getPropertyByNameBuilder.addCode(switchBlock.build());
+        }
+        interfaceBuilder.addMethod(getPropertyByNameBuilder.build());
+
+        // 3. setPropertyByName(String, Object)
+        MethodSpec.Builder setPropertyByNameBuilder = MethodSpec.methodBuilder("setPropertyByName")
+                .addModifiers(Modifier.PUBLIC, Modifier.DEFAULT)
+                .addAnnotation(Override.class)
+                .addAnnotation(AnnotationSpec.builder(SuppressWarnings.class)
+                        .addMember("value", "$S", "unchecked")
+                        .build())
+                .addParameter(String.class, "propertyName")
+                .addParameter(Object.class, "value");
+
+        if (!fields.isEmpty()) {
+            setPropertyByNameBuilder.beginControlFlow("switch (propertyName)");
+            for (FieldInfo field : fields) {
+                String setterName = "set" + capitalize(field.name);
+                // Use convertType for primitives and wrapper types to handle boxing/unboxing
+                if (field.type.isPrimitive() || isWrapperType(field.type)) {
+                    // Get the wrapper class for primitives
+                    TypeName wrapperType = field.type.isPrimitive() ? field.type.box() : field.type;
+                    setPropertyByNameBuilder.addStatement("case $N -> $N(($T) $T.convertType(value, $T.class))",
+                            "$" + field.name, setterName, field.type,
+                            ClassName.get("xyz.jphil.datahelper", "DataHelper_I"), wrapperType);
+                } else {
+                    setPropertyByNameBuilder.addStatement("case $N -> $N(($T) value)", "$" + field.name, setterName, field.type);
+                }
+            }
+            setPropertyByNameBuilder.endControlFlow();
+        }
+        interfaceBuilder.addMethod(setPropertyByNameBuilder.build());
+
+        // 4. getPropertyType(String)
+        MethodSpec.Builder getPropertyTypeBuilder = MethodSpec.methodBuilder("getPropertyType")
+                .addModifiers(Modifier.PUBLIC, Modifier.DEFAULT)
+                .addAnnotation(Override.class)
+                .addParameter(String.class, "propertyName")
+                .returns(ParameterizedTypeName.get(ClassName.get(Class.class), WildcardTypeName.subtypeOf(Object.class)));
+
+        if (fields.isEmpty()) {
+            getPropertyTypeBuilder.addStatement("return null");
+        } else {
+            // Build switch expression as a statement (with semicolon)
+            CodeBlock.Builder switchBlock = CodeBlock.builder();
+            switchBlock.add("return switch (propertyName) {\n");
+            switchBlock.indent();
+            for (FieldInfo field : fields) {
+                // For parameterized types, use raw type
+                if (field.type instanceof ParameterizedTypeName) {
+                    ParameterizedTypeName paramType = (ParameterizedTypeName) field.type;
+                    switchBlock.add("case $N -> $T.class;\n", "$" + field.name, paramType.rawType);
+                } else {
+                    switchBlock.add("case $N -> $T.class;\n", "$" + field.name, field.type);
+                }
+            }
+            switchBlock.add("default -> null;\n");
+            switchBlock.unindent();
+            switchBlock.add("};");  // Semicolon AFTER closing brace!
+            getPropertyTypeBuilder.addCode(switchBlock.build());
+        }
+        interfaceBuilder.addMethod(getPropertyTypeBuilder.build());
+
+        // 5. createNestedObject(String)
+        MethodSpec.Builder createNestedObjectBuilder = MethodSpec.methodBuilder("createNestedObject")
+                .addModifiers(Modifier.PUBLIC, Modifier.DEFAULT)
+                .addAnnotation(Override.class)
+                .addParameter(String.class, "propertyName")
                 .returns(ParameterizedTypeName.get(
-                        ClassName.get(Map.class),
-                        ClassName.get(String.class),
-                        ClassName.get(Object.class)))
-                .addStatement("var entries = new $T<$T<$T, $T>>()",
-                        ArrayList.class, Map.Entry.class, String.class, Object.class);
+                        ClassName.get("xyz.jphil.datahelper", "DataHelper_I"),
+                        WildcardTypeName.subtypeOf(Object.class)));
 
-        for (FieldInfo field : fields) {
-            String getterName = "get" + capitalize(field.name);
-            String symbolName = "$" + field.name;
-
-            // For primitive types, skip null check; for objects, check if not null
-            if (field.type.isPrimitive()) {
-                toMapBuilder.addStatement("entries.add($T.entry($N, $N()))",
-                        Map.class, symbolName, getterName);
-            } else {
-                toMapBuilder.addStatement("if ($N() != null) entries.add($T.entry($N, $N()))",
-                        getterName, Map.class, symbolName, getterName);
+        List<FieldInfo> nestedFields = fields.stream().filter(f -> f.isNestedDataHelper).toList();
+        if (nestedFields.isEmpty()) {
+            createNestedObjectBuilder.addStatement("return null");
+        } else {
+            CodeBlock.Builder switchBlock = CodeBlock.builder();
+            switchBlock.add("return switch (propertyName) {\n");
+            switchBlock.indent();
+            for (FieldInfo field : nestedFields) {
+                switchBlock.add("case $N -> new $T();\n", "$" + field.name, field.type);
             }
+            switchBlock.add("default -> null;\n");
+            switchBlock.unindent();
+            switchBlock.add("};");  // Semicolon AFTER closing brace!
+            createNestedObjectBuilder.addCode(switchBlock.build());
         }
+        interfaceBuilder.addMethod(createNestedObjectBuilder.build());
 
-        toMapBuilder.addStatement("return $T.ofEntries(entries.toArray($T[]::new))", Map.class, Map.Entry.class);
-        interfaceBuilder.addMethod(toMapBuilder.build());
-
-        // Add fromValueProvider(Function<String, Object> valueProvider) method
-        MethodSpec.Builder fromValueProviderBuilder = MethodSpec.methodBuilder("fromValueProvider")
+        // 6. createListElement(String)
+        MethodSpec.Builder createListElementBuilder = MethodSpec.methodBuilder("createListElement")
                 .addModifiers(Modifier.PUBLIC, Modifier.DEFAULT)
-                .addAnnotation(AnnotationSpec.builder(SuppressWarnings.class)
-                        .addMember("value", "$S", "unchecked")
-                        .build())
-                .addParameter(ParameterizedTypeName.get(
-                        ClassName.get("java.util.function", "Function"),
-                        ClassName.get(String.class),
-                        ClassName.get(Object.class)), "valueProvider")
-                .returns(TypeVariableName.get("E"));
+                .addAnnotation(Override.class)
+                .addParameter(String.class, "propertyName")
+                .returns(ParameterizedTypeName.get(
+                        ClassName.get("xyz.jphil.datahelper", "DataHelper_I"),
+                        WildcardTypeName.subtypeOf(Object.class)));
 
-        for (FieldInfo field : fields) {
-            String setterName = "set" + capitalize(field.name);
-            String symbolName = "$" + field.name;
-            String varName = field.name + "Val";
-            fromValueProviderBuilder.addStatement("var $N = valueProvider.apply($N)", varName, symbolName);
-            fromValueProviderBuilder.addStatement("if ($N != null) $N(($T) $N)",
-                    varName, setterName, field.type, varName);
+        List<FieldInfo> listOfDataHelperFields = fields.stream().filter(f -> f.isListOfDataHelper).toList();
+        if (listOfDataHelperFields.isEmpty()) {
+            createListElementBuilder.addStatement("return null");
+        } else {
+            CodeBlock.Builder switchBlock = CodeBlock.builder();
+            switchBlock.add("return switch (propertyName) {\n");
+            switchBlock.indent();
+            for (FieldInfo field : listOfDataHelperFields) {
+                switchBlock.add("case $N -> new $T();\n", "$" + field.name, field.listElementType);
+            }
+            switchBlock.add("default -> null;\n");
+            switchBlock.unindent();
+            switchBlock.add("};");  // Semicolon AFTER closing brace!
+            createListElementBuilder.addCode(switchBlock.build());
         }
+        interfaceBuilder.addMethod(createListElementBuilder.build());
 
-        fromValueProviderBuilder.addStatement("return (E) this");
-        interfaceBuilder.addMethod(fromValueProviderBuilder.build());
-
-        // Add fromTypedValueProvider(BiFunction<String, Class<?>, Object> typedValueProvider) method
-        // This provides field name AND type information, useful for TeaVM JSValueConverter
-        MethodSpec.Builder fromTypedValueProviderBuilder = MethodSpec.methodBuilder("fromTypedValueProvider")
+        // 7. isListField(String)
+        MethodSpec.Builder isListFieldBuilder = MethodSpec.methodBuilder("isListField")
                 .addModifiers(Modifier.PUBLIC, Modifier.DEFAULT)
-                .addAnnotation(AnnotationSpec.builder(SuppressWarnings.class)
-                        .addMember("value", "$S", "unchecked")
-                        .build())
-                .addParameter(ParameterizedTypeName.get(
-                        ClassName.get("java.util.function", "BiFunction"),
-                        ClassName.get(String.class),
-                        ParameterizedTypeName.get(ClassName.get(Class.class), WildcardTypeName.subtypeOf(Object.class)),
-                        ClassName.get(Object.class)), "typedValueProvider")
-                .returns(TypeVariableName.get("E"));
+                .addAnnotation(Override.class)
+                .addParameter(String.class, "propertyName")
+                .returns(boolean.class);
 
-        for (FieldInfo field : fields) {
-            String setterName = "set" + capitalize(field.name);
-            String symbolName = "$" + field.name;
-            String varName = field.name + "Val";
-
-            // Get the type class - for primitives use wrapper class
-            TypeName typeForClass = field.type;
-            if (field.type.equals(TypeName.INT)) {
-                typeForClass = TypeName.get(Integer.class);
-            } else if (field.type.equals(TypeName.LONG)) {
-                typeForClass = TypeName.get(Long.class);
-            } else if (field.type.equals(TypeName.DOUBLE)) {
-                typeForClass = TypeName.get(Double.class);
-            } else if (field.type.equals(TypeName.FLOAT)) {
-                typeForClass = TypeName.get(Float.class);
-            } else if (field.type.equals(TypeName.BOOLEAN)) {
-                typeForClass = TypeName.get(Boolean.class);
-            } else if (field.type.equals(TypeName.BYTE)) {
-                typeForClass = TypeName.get(Byte.class);
-            } else if (field.type.equals(TypeName.SHORT)) {
-                typeForClass = TypeName.get(Short.class);
-            } else if (field.type.equals(TypeName.CHAR)) {
-                typeForClass = TypeName.get(Character.class);
+        List<FieldInfo> listFields = fields.stream().filter(f -> f.isListField).toList();
+        if (listFields.isEmpty()) {
+            isListFieldBuilder.addStatement("return false");
+        } else if (listFields.size() == 1) {
+            isListFieldBuilder.addStatement("return $N.equals(propertyName)", "$" + listFields.get(0).name);
+        } else {
+            CodeBlock.Builder switchBlock = CodeBlock.builder();
+            switchBlock.add("return switch (propertyName) {\n");
+            switchBlock.indent();
+            for (FieldInfo field : listFields) {
+                switchBlock.add("case $N -> true;\n", "$" + field.name);
             }
-
-            // For parameterized types (List<String>, etc.), use raw type for .class
-            if (typeForClass instanceof ParameterizedTypeName) {
-                ParameterizedTypeName paramType = (ParameterizedTypeName) typeForClass;
-                fromTypedValueProviderBuilder.addStatement("var $N = typedValueProvider.apply($N, $T.class)",
-                        varName, symbolName, paramType.rawType);
-            } else {
-                fromTypedValueProviderBuilder.addStatement("var $N = typedValueProvider.apply($N, $T.class)",
-                        varName, symbolName, typeForClass);
-            }
-            fromTypedValueProviderBuilder.addStatement("if ($N != null) $N(($T) $N)",
-                    varName, setterName, field.type, varName);
+            switchBlock.add("default -> false;\n");
+            switchBlock.unindent();
+            switchBlock.add("};");  // Semicolon AFTER closing brace!
+            isListFieldBuilder.addCode(switchBlock.build());
         }
+        interfaceBuilder.addMethod(isListFieldBuilder.build());
 
-        fromTypedValueProviderBuilder.addStatement("return (E) this");
-        interfaceBuilder.addMethod(fromTypedValueProviderBuilder.build());
+        // 8. isNestedObjectField(String)
+        MethodSpec.Builder isNestedObjectFieldBuilder = MethodSpec.methodBuilder("isNestedObjectField")
+                .addModifiers(Modifier.PUBLIC, Modifier.DEFAULT)
+                .addAnnotation(Override.class)
+                .addParameter(String.class, "propertyName")
+                .returns(boolean.class);
 
-        // Note: fromMap() is now provided by DataHelper_I base interface
+        if (nestedFields.isEmpty()) {
+            isNestedObjectFieldBuilder.addStatement("return false");
+        } else if (nestedFields.size() == 1) {
+            isNestedObjectFieldBuilder.addStatement("return $N.equals(propertyName)", "$" + nestedFields.get(0).name);
+        } else {
+            CodeBlock.Builder switchBlock = CodeBlock.builder();
+            switchBlock.add("return switch (propertyName) {\n");
+            switchBlock.indent();
+            for (FieldInfo field : nestedFields) {
+                switchBlock.add("case $N -> true;\n", "$" + field.name);
+            }
+            switchBlock.add("default -> false;\n");
+            switchBlock.unindent();
+            switchBlock.add("};");  // Semicolon AFTER closing brace!
+            isNestedObjectFieldBuilder.addCode(switchBlock.build());
+        }
+        interfaceBuilder.addMethod(isNestedObjectFieldBuilder.build());
 
         // Build and write the file
         TypeSpec interfaceSpec = interfaceBuilder.build();
@@ -307,96 +431,130 @@ public class DataHelperProcessor extends AbstractProcessor {
     }
 
     /**
-     * Extracts the propertyAnnotations parameter from the @DataHelper annotation.
-     * Returns a list of ClassName objects representing the annotation classes to apply.
+     * Check if type is a wrapper type (Integer, Long, Double, etc.)
      */
-    private List<ClassName> extractPropertyAnnotations(TypeElement element) {
-        List<ClassName> result = new ArrayList<>();
-
-        for (AnnotationMirror annotationMirror : element.getAnnotationMirrors()) {
-            // Check if this is the @DataHelper annotation
-            if (annotationMirror.getAnnotationType().toString()
-                    .equals("xyz.jphil.datahelper.DataHelper")) {
-
-                // Get the annotation values
-                Map<? extends ExecutableElement, ? extends AnnotationValue> elementValues =
-                        annotationMirror.getElementValues();
-
-                for (Map.Entry<? extends ExecutableElement, ? extends AnnotationValue> entry : elementValues.entrySet()) {
-                    if (entry.getKey().getSimpleName().toString().equals("propertyAnnotations")) {
-                        // The value is a list of annotation classes
-                        @SuppressWarnings("unchecked")
-                        List<? extends AnnotationValue> annotationClasses =
-                                (List<? extends AnnotationValue>) entry.getValue().getValue();
-
-                        for (AnnotationValue annotationClass : annotationClasses) {
-                            DeclaredType annotationType = (DeclaredType) annotationClass.getValue();
-                            TypeElement annotationElement = (TypeElement) annotationType.asElement();
-                            String packageName = processingEnv.getElementUtils()
-                                    .getPackageOf(annotationElement).toString();
-                            String simpleName = annotationElement.getSimpleName().toString();
-                            result.add(ClassName.get(packageName, simpleName));
-
-                            processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE,
-                                    "Adding property annotation: " + packageName + "." + simpleName);
-                        }
-                    }
-                }
-            }
-        }
-
-        return result;
+    private boolean isWrapperType(TypeName type) {
+        return type.equals(TypeName.get(Integer.class)) ||
+               type.equals(TypeName.get(Long.class)) ||
+               type.equals(TypeName.get(Double.class)) ||
+               type.equals(TypeName.get(Float.class)) ||
+               type.equals(TypeName.get(Short.class)) ||
+               type.equals(TypeName.get(Byte.class)) ||
+               type.equals(TypeName.get(Boolean.class)) ||
+               type.equals(TypeName.get(Character.class));
     }
 
     /**
-     * Extracts the superInterfaces parameter from the @DataHelper annotation.
-     * Returns a list of TypeName objects representing the interfaces to extend.
+     * Check if type is List<T>
      */
-    private List<TypeName> extractSuperInterfaces(TypeElement element) {
-        List<TypeName> result = new ArrayList<>();
+    private boolean isListType(TypeMirror type) {
+        if (type.getKind() != TypeKind.DECLARED) return false;
 
-        for (AnnotationMirror annotationMirror : element.getAnnotationMirrors()) {
-            // Check if this is the @DataHelper annotation
-            if (annotationMirror.getAnnotationType().toString()
-                    .equals("xyz.jphil.datahelper.DataHelper")) {
+        DeclaredType declaredType = (DeclaredType) type;
+        TypeElement typeElement = (TypeElement) declaredType.asElement();
+        String qualifiedName = typeElement.getQualifiedName().toString();
 
-                // Get the annotation values
-                Map<? extends ExecutableElement, ? extends AnnotationValue> elementValues =
-                        annotationMirror.getElementValues();
+        return qualifiedName.equals("java.util.List");
+    }
 
-                for (Map.Entry<? extends ExecutableElement, ? extends AnnotationValue> entry : elementValues.entrySet()) {
-                    if (entry.getKey().getSimpleName().toString().equals("superInterfaces")) {
-                        // The value is a list of interface classes
-                        @SuppressWarnings("unchecked")
-                        List<? extends AnnotationValue> interfaceClasses =
-                                (List<? extends AnnotationValue>) entry.getValue().getValue();
+    /**
+     * Check if type is a supported simple type (primitive, boxed, or String).
+     * These types can be directly serialized/deserialized without custom handling.
+     */
+    private boolean isSupportedSimpleType(TypeMirror type) {
+        // Primitives
+        if (type.getKind().isPrimitive()) {
+            return true;
+        }
 
-                        for (AnnotationValue interfaceClass : interfaceClasses) {
-                            DeclaredType interfaceType = (DeclaredType) interfaceClass.getValue();
-                            TypeElement interfaceElement = (TypeElement) interfaceType.asElement();
-                            String packageName = processingEnv.getElementUtils()
-                                    .getPackageOf(interfaceElement).toString();
-                            String simpleName = interfaceElement.getSimpleName().toString();
-                            result.add(ClassName.get(packageName, simpleName));
+        // String and boxed primitives
+        String typeName = type.toString();
+        return typeName.equals("java.lang.String") ||
+               typeName.equals("java.lang.Integer") ||
+               typeName.equals("java.lang.Long") ||
+               typeName.equals("java.lang.Double") ||
+               typeName.equals("java.lang.Float") ||
+               typeName.equals("java.lang.Boolean") ||
+               typeName.equals("java.lang.Short") ||
+               typeName.equals("java.lang.Byte") ||
+               typeName.equals("java.lang.Character");
+    }
 
-                            processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE,
-                                    "Adding super interface: " + packageName + "." + simpleName);
-                        }
-                    }
-                }
+    /**
+     * Check if type is a DataHelper type (can be recursively processed).
+     *
+     * Three cases:
+     * 1. Has @DataHelper annotation (will generate DataHelper_I implementation)
+     *    - Checked first to handle first compile pass (chicken-and-egg problem)
+     * 2. Already implements DataHelper_I (hand-written or from previous compile)
+     *    - Allows custom implementations without annotation
+     * 3. Neither - treated as opaque type (no recursive processing)
+     */
+    private boolean isDataHelperType(TypeMirror type) {
+        if (type.getKind() != TypeKind.DECLARED) return false;
+
+        TypeElement typeElement = (TypeElement) processingEnv.getTypeUtils().asElement(type);
+        if (typeElement == null) return false;
+
+        // Case 1: Check if it's annotated with @DataHelper
+        // (This handles first compile pass - annotation processor generated types)
+        if (typeElement.getAnnotation(DataHelper.class) != null) {
+            return true;
+        }
+
+        // Case 2: Check if it implements DataHelper_I
+        // (This handles hand-written implementations and already-compiled types)
+        for (TypeMirror interfaceType : typeElement.getInterfaces()) {
+            if (interfaceType.toString().startsWith("xyz.jphil.datahelper.DataHelper_I")) {
+                return true;
             }
         }
 
-        return result;
+        // Case 3: Neither - not a DataHelper type
+        // Will be treated as opaque (simple property, no recursive processing)
+        return false;
+    }
+
+    /**
+     * Get element type from List<T>
+     */
+    private TypeName getListElementType(TypeMirror type) {
+        if (!isListType(type)) return null;
+
+        DeclaredType declaredType = (DeclaredType) type;
+        if (declaredType.getTypeArguments().isEmpty()) return null;
+
+        return TypeName.get(declaredType.getTypeArguments().get(0));
+    }
+
+    /**
+     * Get element TypeMirror from List<T>
+     */
+    private TypeMirror getListElementTypeMirror(TypeMirror type) {
+        if (!isListType(type)) return null;
+
+        DeclaredType declaredType = (DeclaredType) type;
+        if (declaredType.getTypeArguments().isEmpty()) return null;
+
+        return declaredType.getTypeArguments().get(0);
     }
 
     private static class FieldInfo {
         final String name;
         final TypeName type;
+        final boolean isListField;
+        final boolean isNestedDataHelper;
+        final boolean isListOfDataHelper;
+        final TypeName listElementType;
 
-        FieldInfo(String name, TypeName type) {
+        FieldInfo(String name, TypeName type, boolean isListField, boolean isNestedDataHelper,
+                  boolean isListOfDataHelper, TypeName listElementType) {
             this.name = name;
             this.type = type;
+            this.isListField = isListField;
+            this.isNestedDataHelper = isNestedDataHelper;
+            this.isListOfDataHelper = isListOfDataHelper;
+            this.listElementType = listElementType;
         }
     }
 }

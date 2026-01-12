@@ -50,6 +50,12 @@
             <artifactId>xyz-jphil-teavm-dto-utils</artifactId>
             <version>1.0</version>
         </dependency>
+        <!-- DataHelper TeaVM Adapter -->
+        <dependency>
+            <groupId>io.github.xyz-jphil</groupId>
+            <artifactId>xyz-jphil-datahelper-teavm</artifactId>
+            <version>1.0</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
@@ -71,6 +77,34 @@
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
+            </plugin>
+            <!-- Copy HTML test files to generated JS directories -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>copy-test-html</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <copy file="src/main/resources/test-html/nested-object-test.html"
+                                      tofile="${project.build.directory}/generated/js/nested-object-test/test.html"
+                                      failonerror="false"/>
+                                <copy file="src/main/resources/test-html/value-provider-test.html"
+                                      tofile="${project.build.directory}/generated/js/value-provider-test/test.html"
+                                      failonerror="false"/>
+                                <copy file="src/main/resources/test-html/custom-datahelper-test.html"
+                                      tofile="${project.build.directory}/generated/js/custom-datahelper-test/test.html"
+                                      failonerror="false"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <!-- TeaVM Maven Plugin -->
             <plugin>
@@ -109,111 +143,6 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <id>int-vs-integer-test</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <mainClass>com.example.test.IntegerVsIntTest</mainClass>
-                            <targetDirectory>${project.build.directory}/generated/js/int-vs-integer</targetDirectory>
-                            <targetFileName>test.js</targetFileName>
-                            <minifying>false</minifying>
-                            <debugInformationGenerated>true</debugInformationGenerated>
-                            <sourceMapsGenerated>true</sourceMapsGenerated>
-                            <sourceFilesCopied>true</sourceFilesCopied>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>int-primitive-null-test</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <mainClass>com.example.test.IntPrimitiveNullTest</mainClass>
-                            <targetDirectory>${project.build.directory}/generated/js/int-null-test</targetDirectory>
-                            <targetFileName>test.js</targetFileName>
-                            <minifying>false</minifying>
-                            <debugInformationGenerated>true</debugInformationGenerated>
-                            <sourceMapsGenerated>true</sourceMapsGenerated>
-                            <sourceFilesCopied>true</sourceFilesCopied>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>integer-with-helper-test</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <mainClass>com.example.test.IntegerWithHelperTest</mainClass>
-                            <targetDirectory>${project.build.directory}/generated/js/integer-helper-test</targetDirectory>
-                            <targetFileName>test.js</targetFileName>
-                            <minifying>false</minifying>
-                            <debugInformationGenerated>true</debugInformationGenerated>
-                            <sourceMapsGenerated>true</sourceMapsGenerated>
-                            <sourceFilesCopied>true</sourceFilesCopied>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>integer-proper-conversion-test</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <mainClass>com.example.test.IntegerProperConversionTest</mainClass>
-                            <targetDirectory>${project.build.directory}/generated/js/integer-proper-test</targetDirectory>
-                            <targetFileName>test.js</targetFileName>
-                            <minifying>false</minifying>
-                            <debugInformationGenerated>true</debugInformationGenerated>
-                            <sourceMapsGenerated>true</sourceMapsGenerated>
-                            <sourceFilesCopied>true</sourceFilesCopied>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>integer-final-solution-test</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <mainClass>com.example.test.IntegerFinalSolutionTest</mainClass>
-                            <targetDirectory>${project.build.directory}/generated/js/integer-final-test</targetDirectory>
-                            <targetFileName>test.js</targetFileName>
-                            <minifying>false</minifying>
-                            <debugInformationGenerated>true</debugInformationGenerated>
-                            <sourceMapsGenerated>true</sourceMapsGenerated>
-                            <sourceFilesCopied>true</sourceFilesCopied>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>jsnumber-cast-test</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <mainClass>com.example.test.JSNumberCastTest</mainClass>
-                            <targetDirectory>${project.build.directory}/generated/js/jsnumber-cast-test</targetDirectory>
-                            <targetFileName>test.js</targetFileName>
-                            <minifying>false</minifying>
-                            <debugInformationGenerated>true</debugInformationGenerated>
-                            <sourceMapsGenerated>true</sourceMapsGenerated>
-                            <sourceFilesCopied>true</sourceFilesCopied>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>jsnumber-direct-cast-test</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <mainClass>com.example.test.JSNumberDirectCastTest</mainClass>
-                            <targetDirectory>${project.build.directory}/generated/js/jsnumber-direct-cast-test</targetDirectory>
-                            <targetFileName>test.js</targetFileName>
-                            <minifying>false</minifying>
-                            <debugInformationGenerated>true</debugInformationGenerated>
-                            <sourceMapsGenerated>true</sourceMapsGenerated>
-                            <sourceFilesCopied>true</sourceFilesCopied>
-                        </configuration>
-                    </execution>
-                    <execution>
                         <id>value-provider-test</id>
                         <goals>
                             <goal>compile</goal>
@@ -236,6 +165,36 @@
                         <configuration>
                             <mainClass>com.example.test.CanonicalMapperTest</mainClass>
                             <targetDirectory>${project.build.directory}/generated/js/canonical-mapper-test</targetDirectory>
+                            <targetFileName>test.js</targetFileName>
+                            <minifying>false</minifying>
+                            <debugInformationGenerated>true</debugInformationGenerated>
+                            <sourceMapsGenerated>true</sourceMapsGenerated>
+                            <sourceFilesCopied>true</sourceFilesCopied>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>nested-object-test</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>com.example.test.NestedObjectTest</mainClass>
+                            <targetDirectory>${project.build.directory}/generated/js/nested-object-test</targetDirectory>
+                            <targetFileName>test.js</targetFileName>
+                            <minifying>false</minifying>
+                            <debugInformationGenerated>true</debugInformationGenerated>
+                            <sourceMapsGenerated>true</sourceMapsGenerated>
+                            <sourceFilesCopied>true</sourceFilesCopied>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>custom-datahelper-test</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>com.example.test.CustomDataHelperTest</mainClass>
+                            <targetDirectory>${project.build.directory}/generated/js/custom-datahelper-test</targetDirectory>
                             <targetFileName>test.js</targetFileName>
                             <minifying>false</minifying>
                             <debugInformationGenerated>true</debugInformationGenerated>

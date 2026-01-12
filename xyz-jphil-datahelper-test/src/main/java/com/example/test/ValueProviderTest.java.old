@@ -3,26 +3,27 @@ package com.example.test;
 import org.teavm.jso.JSBody;
 import org.teavm.jso.JSObject;
 import org.teavm.jso.core.JSMapLike;
-import xyz.jphil.datahelper.teavm.TeaVMMapLike;
+import org.teavm.jso.core.JSObjects;
+import xyz.jphil.teavm.dto.TeaVMMappers;
 
 /**
- * Test that demonstrates fromMapLike working with TeaVM JSMapLike.
- * This uses the new MapLike abstraction layer for clean, type-safe conversions.
+ * Test that demonstrates fromValueProvider working with TeaVM JSMapLike.
+ * This is the canonical approach recommended by the TeaVM maintainer.
  */
 public class ValueProviderTest {
 
     public static void main(String[] args) {
-        testFromMapLikeWithJSMapLike();
+        testFromValueProviderWithJSMapLike();
     }
 
-    private static void testFromMapLikeWithJSMapLike() {
-        // Test Case 1: Parse JSON and use fromMapLike with JSMapLike
+    private static void testFromValueProviderWithJSMapLike() {
+        // Test Case 1: Parse JSON and use fromValueProvider with JSMapLike
         String json1 = "{\"firstName\":\"Alice\",\"lastName\":\"Smith\",\"age\":28,\"email\":\"alice@example.com\"}";
-        JSMapLike<JSObject> personJson = (JSMapLike<JSObject>) parseJSON(json1);
+        var personJson = (JSMapLike<JSObject>) parseJSON(json1);
 
-        TeaVMTestDTO person = new TeaVMTestDTO();
-        // Use TeaVMMapLike to wrap JSMapLike and provide automatic type conversions
-        person.fromMapLike(TeaVMMapLike.wrap(personJson));
+        var person = new TeaVMTestDTO();
+        // Use TeaVMMappers for clean, generic JavaScript to Java conversion
+        person.fromTypedValueProvider(TeaVMMappers.fromJSMapLike(personJson));
 
         log("Test 1 - Full data:");
         log("  firstName: " + person.getFirstName()); // Should be "Alice"
@@ -32,10 +33,10 @@ public class ValueProviderTest {
 
         // Test Case 2: Missing optional field (age is undefined)
         String json2 = "{\"firstName\":\"Bob\",\"lastName\":\"Jones\",\"email\":\"bob@example.com\"}";
-        JSMapLike<JSObject> person2Json = (JSMapLike<JSObject>) parseJSON(json2);
+        var person2Json = (JSMapLike<JSObject>) parseJSON(json2);
 
-        TeaVMTestDTO person2 = new TeaVMTestDTO();
-        person2.fromMapLike(TeaVMMapLike.wrap(person2Json));
+        var person2 = new TeaVMTestDTO();
+        person2.fromTypedValueProvider(TeaVMMappers.fromJSMapLike(person2Json));
 
         log("Test 2 - Missing age field:");
         log("  firstName: " + person2.getFirstName()); // Should be "Bob"
@@ -43,10 +44,10 @@ public class ValueProviderTest {
 
         // Test Case 3: Distinguish null from zero
         String json3 = "{\"firstName\":\"Baby\",\"lastName\":\"Doe\",\"age\":0,\"email\":\"baby@example.com\"}";
-        JSMapLike<JSObject> person3Json = (JSMapLike<JSObject>) parseJSON(json3);
+        var person3Json = (JSMapLike<JSObject>) parseJSON(json3);
 
-        TeaVMTestDTO person3 = new TeaVMTestDTO();
-        person3.fromMapLike(TeaVMMapLike.wrap(person3Json));
+        var person3 = new TeaVMTestDTO();
+        person3.fromTypedValueProvider(TeaVMMappers.fromJSMapLike(person3Json));
 
         log("Test 3 - Age is zero:");
         log("  firstName: " + person3.getFirstName()); // Should be "Baby"
@@ -54,37 +55,20 @@ public class ValueProviderTest {
 
         // Test Case 4: Explicit null
         String json4 = "{\"firstName\":\"Mystery\",\"lastName\":\"Person\",\"age\":null}";
-        JSMapLike<JSObject> person4Json = (JSMapLike<JSObject>) parseJSON(json4);
+        var person4Json = (JSMapLike<JSObject>) parseJSON(json4);
 
-        TeaVMTestDTO person4 = new TeaVMTestDTO();
-        person4.fromMapLike(TeaVMMapLike.wrap(person4Json));
+        var person4 = new TeaVMTestDTO();
+        person4.fromTypedValueProvider(TeaVMMappers.fromJSMapLike(person4Json));
 
         log("Test 4 - Age is explicitly null:");
         log("  firstName: " + person4.getFirstName()); // Should be "Mystery"
         log("  age: " + person4.getAge());             // Should be null
-
-        // Test Case 5: Serialize back to JavaScript (toMapLike)
-        TeaVMTestDTO person5 = new TeaVMTestDTO()
-                .firstName("Charlie")
-                .lastName("Brown")
-                .age(35)
-                .email("charlie@example.com");
-
-        TeaVMMapLike mapLike = (TeaVMMapLike) person5.toMapLike(false);
-        JSMapLike<JSObject> jsResult = mapLike.unwrap();
-        String jsonResult = stringifyJSON(jsResult);
-
-        log("Test 5 - Serialize to JSON:");
-        log("  " + jsonResult); // Should be valid JSON with all fields
 
         log("All tests completed!");
     }
 
     @JSBody(params = {"jsonString"}, script = "return JSON.parse(jsonString);")
     private static native JSObject parseJSON(String jsonString);
-
-    @JSBody(params = {"obj"}, script = "return JSON.stringify(obj);")
-    private static native String stringifyJSON(JSMapLike<JSObject> obj);
 
     @JSBody(params = {"message"}, script = "console.log(message);")
     private static native void log(String message);
