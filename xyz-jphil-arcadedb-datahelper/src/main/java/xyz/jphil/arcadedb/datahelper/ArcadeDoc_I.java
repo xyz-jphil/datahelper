@@ -110,7 +110,15 @@ public interface ArcadeDoc_I<E extends ArcadeDoc_I<E>>
 
             if (isNestedObjectField(fieldName)) {
                 // Nested DataHelper object
-                if (value instanceof Map) {
+                if (value instanceof Document) {
+                    // ArcadeDB Document (ImmutableEmbeddedDocument)
+                    DataHelper_I<?> nested = createNestedObject(fieldName);
+                    if (nested instanceof ArcadeDoc_I) {
+                        ((ArcadeDoc_I<?>) nested).fromArcadeDocument((Document) value);
+                        setPropertyByName(fieldName, nested);
+                    }
+                } else if (value instanceof Map) {
+                    // Plain Map
                     DataHelper_I<?> nested = createNestedObject(fieldName);
                     if (nested instanceof ArcadeDoc_I) {
                         ((ArcadeDoc_I<?>) nested).fromArcadeMap((Map<String, Object>) value);
@@ -123,8 +131,17 @@ public interface ArcadeDoc_I<E extends ArcadeDoc_I<E>>
                 List<Object> targetList = new ArrayList<>();
 
                 for (Object item : sourceList) {
-                    if (item instanceof Map) {
-                        // Try to create nested object from map
+                    if (item instanceof Document) {
+                        // ArcadeDB Document (ImmutableEmbeddedDocument)
+                        DataHelper_I<?> listElement = createListElement(fieldName);
+                        if (listElement instanceof ArcadeDoc_I) {
+                            ((ArcadeDoc_I<?>) listElement).fromArcadeDocument((Document) item);
+                            targetList.add(listElement);
+                        } else {
+                            targetList.add(item);
+                        }
+                    } else if (item instanceof Map) {
+                        // Plain Map
                         DataHelper_I<?> listElement = createListElement(fieldName);
                         if (listElement instanceof ArcadeDoc_I) {
                             ((ArcadeDoc_I<?>) listElement).fromArcadeMap((Map<String, Object>) item);

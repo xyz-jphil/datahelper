@@ -10,6 +10,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
+import static xyz.jphil.arcadedb.datahelper.TestPersonDTO_I.*;
+
 /**
  * Integration test demonstrating ArcadeDB DataHelper usage.
  * This follows the patterns from arcade-db-working-examples.md
@@ -83,7 +85,7 @@ public class ArcadeDBIntegrationTest {
         Database db = server.getDatabase(DB_NAME);
 
         // Initialize schema using TypeDef
-        InitDoc.initDocTypes(db, TestPersonDTO.typeDef());
+        InitDoc.initDocTypes(db, TestPersonDTO.TYPEDEF);
 
         System.out.println("   ✓ Schema initialized with unique index on 'email'\n");
     }
@@ -104,9 +106,9 @@ public class ArcadeDBIntegrationTest {
             // Save directly - no intermediate Map conversion needed!
             Update.use(db)
                     .select("TestPersonDTO")
-                    .whereEq("email", person.email())
+                    .whereEq("email", person.email())  // Old API uses strings
                     .upsert()
-                    .from(person)  // Direct usage
+                    .from(person, new String[0])  // Explicit empty array to avoid ambiguity
                     .saveDocument();
 
             System.out.println("   ✓ Created person: " + person.name() + " (" + person.email() + ")");
@@ -152,7 +154,7 @@ public class ArcadeDBIntegrationTest {
         db.transaction(() -> {
             Update.use(db)
                     .select("TestPersonDTO")
-                    .whereEq("email", "john@example.com")
+                    .whereEq("email", "john@example.com")  // Old API uses strings
                     .upsert(alreadyExists -> {
                         System.out.println("   Document exists: " + alreadyExists);
                     })
@@ -192,9 +194,9 @@ public class ArcadeDBIntegrationTest {
 
             Update.use(db)
                     .select("TestPersonDTO")
-                    .whereEq("email", person.email())
+                    .whereEq("email", person.email())  // Old API uses strings
                     .upsert()
-                    .from(person)
+                    .from(person, new String[0])  // Explicit empty array to avoid ambiguity
                     .saveDocument();
 
             System.out.println("   ✓ Created Jane with age 25");
@@ -208,7 +210,7 @@ public class ArcadeDBIntegrationTest {
 
             Update.use(db)
                     .select("TestPersonDTO")
-                    .whereEq("email", "jane@example.com")
+                    .whereEq("email", "jane@example.com")  // Old API uses strings
                     .upsert()
                     .from(update, "age")  // Only update age field
                     .saveDocument();

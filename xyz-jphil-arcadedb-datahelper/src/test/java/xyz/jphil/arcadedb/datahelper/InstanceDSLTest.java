@@ -9,6 +9,8 @@ import com.arcadedb.server.ArcadeDBServer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static xyz.jphil.arcadedb.datahelper.TestPersonDTO_I.*;
+
 /**
  * Test demonstrating the new instance-level DSL for ArcadeDB operations.
  *
@@ -86,7 +88,7 @@ public class InstanceDSLTest {
 
         db.transaction(() -> {
             // Initialize schema
-            InitDoc.initDocTypes(db, TestPersonDTO.typeDef());
+            InitDoc.initDocTypes(db, TestPersonDTO.TYPEDEF);
 
             // Create person
             TestPersonDTO person = new TestPersonDTO();
@@ -117,7 +119,7 @@ public class InstanceDSLTest {
 
             // NEW DSL: Upsert with where condition
             Document doc = person.in(db)
-                    .whereEq("email", person.getEmail())
+                    .whereEq($email, person.getEmail())
                     .upsert();
 
             System.out.println("   ✓ First upsert: " + doc.get("name") + ", age=" + doc.get("age"));
@@ -125,7 +127,7 @@ public class InstanceDSLTest {
             // Update age
             person.setAge(31);
             Document doc2 = person.in(db)
-                    .whereEq("email", person.getEmail())
+                    .whereEq($email, person.getEmail())
                     .upsert();
 
             System.out.println("   ✓ Second upsert: " + doc2.get("name") + ", age=" + doc2.get("age"));
@@ -154,8 +156,8 @@ public class InstanceDSLTest {
             person.setAge(36);                   // This will be saved
 
             Document doc = person.in(db)
-                    .whereEq("email", person.getEmail())
-                    .from("age")  // Only update age
+                    .whereEq($email, person.getEmail())
+                    .fields($age)  // Only update age (type-safe)
                     .upsert();
 
             System.out.println("   ✓ After selective update:");
@@ -187,9 +189,9 @@ public class InstanceDSLTest {
 
             Document doc1 = Update.use(db)
                     .select("TestPersonDTO")
-                    .whereEq("email", person.getEmail())
+                    .whereEq("email", person.getEmail())  // Old API uses strings
                     .upsert()
-                    .from(person)
+                    .from(person, new String[0])  // Explicit empty array to avoid ambiguity
                     .saveDocument();
 
             System.out.println("   ✓ Saved via old syntax: " + doc1.get("name"));
@@ -201,7 +203,7 @@ public class InstanceDSLTest {
 
             person.setAge(41);
             Document doc2 = person.in(db)
-                    .whereEq("email", person.getEmail())
+                    .whereEq($email, person.getEmail())
                     .upsert();
 
             System.out.println("   ✓ Updated via new syntax: age=" + doc2.get("age"));

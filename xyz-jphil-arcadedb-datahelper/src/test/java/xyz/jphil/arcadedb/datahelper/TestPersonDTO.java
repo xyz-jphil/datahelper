@@ -1,6 +1,7 @@
-package xyz.jphil.arcadedb.datahelper;
+    package xyz.jphil.arcadedb.datahelper;
 
 import lombok.Data;
+import static xyz.jphil.arcadedb.datahelper.SchemaBuilder.defType;
 import xyz.jphil.datahelper.DataHelper;
 
 /**
@@ -18,10 +19,10 @@ public class TestPersonDTO implements TestPersonDTO_I<TestPersonDTO>, ArcadeDoc_
      * Creates a TypeDef for schema initialization.
      * This method should be called to initialize the schema.
      */
-    public static TypeDef typeDef() {
-        return SchemaBuilder.defType(TestPersonDTO.class)
-                .fields(TestPersonDTO_I.FIELDS)
-                .unique("email")
+    public static TypeDef<TestPersonDTO> TYPEDEF = 
+            defType(TestPersonDTO.class)
+                .fields(FIELDS)  // Type-safe! Accepts List<Field_I<TestPersonDTO, ?>>
+                .unique($email)  // Type-safe! Only accepts Field_I<TestPersonDTO, ?>
                 .__();
-    }
+    
 }

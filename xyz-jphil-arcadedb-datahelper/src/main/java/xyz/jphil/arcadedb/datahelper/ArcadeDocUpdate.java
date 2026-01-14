@@ -1,7 +1,9 @@
 package xyz.jphil.arcadedb.datahelper;
 
 import com.arcadedb.database.Database;
+import xyz.jphil.datahelper.Field_I;
 
+import java.util.Arrays;
 import java.util.HashMap;
 
 /**
@@ -59,10 +61,44 @@ public class ArcadeDocUpdate<E extends ArcadeDoc_I<E>> {
     }
 
     /**
-     * Add an equality condition to the WHERE clause.
+     * Add an equality condition to the WHERE clause (type-safe).
      * Multiple calls add multiple conditions (AND logic).
      *
-     * @param field the field name
+     * <p>Type-safe version that enforces field/value type matching at compile time.
+     * Example:
+     * <pre>
+     * import static TestPersonDTO_I.*;
+     *
+     * person.in(db)
+     *     .whereEq($email, person.email())  // Type-checked
+     *     .upsert();
+     * </pre>
+     *
+     * @param field the field object (e.g., $email, $age)
+     * @param value the value to match (must match field type)
+     * @param <T> the field value type
+     * @return this builder for fluent chaining
+     */
+    public <T> ArcadeDocUpdate<E> whereEq(Field_I<E, T> field, T value) {
+        whereConditions.put(field.name(), value);
+        return this;
+    }
+
+    /**
+     * Add an equality condition to the WHERE clause (string-based).
+     * Multiple calls add multiple conditions (AND logic).
+     *
+     * <p>String-based version for dynamic queries or complex field paths
+     * like embedded objects ("property1.subproperty").
+     * Example:
+     * <pre>
+     * person.in(db)
+     *     .whereEq("email", person.email())
+     *     .whereEq("address.city", "NYC")  // Complex path
+     *     .upsert();
+     * </pre>
+     *
+     * @param field the field name or path
      * @param value the value to match
      * @return this builder for fluent chaining
      */
@@ -72,13 +108,48 @@ public class ArcadeDocUpdate<E extends ArcadeDoc_I<E>> {
     }
 
     /**
-     * Specify which fields to update.
+     * Specify which fields to update (type-safe).
      * If not called or empty array provided, all fields will be updated.
+     *
+     * <p>Type-safe version for refactor-safe field selection.
+     * Example:
+     * <pre>
+     * import static TestPersonDTO_I.*;
+     *
+     * person.in(db)
+     *     .whereEq($email, person.email())
+     *     .fields($name, $age)  // Only update these fields
+     *     .upsert();
+     * </pre>
+     *
+     * @param fields the field objects to update
+     * @return this builder for fluent chaining
+     */
+    @SafeVarargs
+    public final ArcadeDocUpdate<E> fields(Field_I<E, ?>... fields) {
+        this.fieldsToUpdate = Arrays.stream(fields)
+            .map(Field_I::name)
+            .toArray(String[]::new);
+        return this;
+    }
+
+    /**
+     * Specify which fields to update (string-based).
+     * If not called or empty array provided, all fields will be updated.
+     *
+     * <p>String-based version for dynamic field selection or complex field paths.
+     * Example:
+     * <pre>
+     * person.in(db)
+     *     .whereEq("email", person.email())
+     *     .fields("name", "age")  // Only update these fields
+     *     .upsert();
+     * </pre>
      *
      * @param fields the field names to update
      * @return this builder for fluent chaining
      */
-    public ArcadeDocUpdate<E> from(String... fields) {
+    public ArcadeDocUpdate<E> fields(String... fields) {
         this.fieldsToUpdate = fields;
         return this;
     }
@@ -117,9 +188,9 @@ public class ArcadeDocUpdate<E extends ArcadeDoc_I<E>> {
 
             // Map values from source (all fields or selective)
             if (fieldsToUpdate != null && fieldsToUpdate.length > 0) {
-                docUpdate.from(source, fieldsToUpdate);
+                docUpdate.from(source, (String[]) fieldsToUpdate);
             } else {
-                docUpdate.from(source);
+                docUpdate.from(source, new String[0]);  // Explicit empty array to avoid ambiguity
             }
 
             return docUpdate.saveDocument();
@@ -138,9 +209,9 @@ public class ArcadeDocUpdate<E extends ArcadeDoc_I<E>> {
 
         // Map values from source (all fields or selective)
         if (fieldsToUpdate != null && fieldsToUpdate.length > 0) {
-            docUpdate.from(source, fieldsToUpdate);
+            docUpdate.from(source, (String[]) fieldsToUpdate);
         } else {
-            docUpdate.from(source);
+            docUpdate.from(source, new String[0]);  // Explicit empty array to avoid ambiguity
         }
 
         // Execute and return the Document

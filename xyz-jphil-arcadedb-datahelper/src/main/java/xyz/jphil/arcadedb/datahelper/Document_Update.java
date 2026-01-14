@@ -1,20 +1,17 @@
 package xyz.jphil.arcadedb.datahelper;
 
+import com.arcadedb.database.EmbeddedDocument;
 import com.arcadedb.database.MutableDocument;
+import com.arcadedb.database.MutableEmbeddedDocument;
 import com.arcadedb.schema.Type;
-import java.util.Map;
+import xyz.jphil.datahelper.DataHelper_I;
+import xyz.jphil.datahelper.Field_I;
+
+import java.util.*;
 import java.util.function.Supplier;
 
 /**
  * Fluent API for updating ArcadeDB documents.
- * Handles field updates with optional null value handling and error handling.
- *
- * <p>Example usage:
- * <pre>
- * Document_Update.updateDocument(mutableDoc)
- *     .mapValuesWith(person.toMap())
- *     .saveDocument();
- * </pre>
  */
 public class Document_Update {
 
@@ -23,11 +20,7 @@ public class Document_Update {
     private boolean doNotUpdate;
     private ErrorHandler errorHandler;
 
-    /**
-     * Default error handler that logs to System.out.
-     */
     public static final ErrorHandler LOG_TO_STD_OUT = new ErrorHandler() {
-
         @Override
         public void errorInUpdating(String fieldName, Exception ex) {
             System.out.println("Failed to update " + fieldName);
@@ -40,24 +33,8 @@ public class Document_Update {
         }
     };
 
-    /**
-     * Interface for handling errors during document updates.
-     */
     public interface ErrorHandler {
-
-        /**
-         * Called when an error occurs updating a field.
-         *
-         * @param fieldName the field that failed to update
-         * @param ex the exception that occurred
-         */
         void errorInUpdating(String fieldName, Exception ex);
-
-        /**
-         * Called when a field update is skipped (usually due to null value).
-         *
-         * @param fieldName the field that was skipped
-         */
         void skippedUpdate(String fieldName);
     }
 
@@ -149,7 +126,40 @@ public class Document_Update {
     }
 
     /**
-     * Update fields directly from a DataHelper object.
+     * Update fields directly from a DataHelper object (type-safe).
+     *
+     * <p>Type-safe version for refactor-safe field selection.
+     * Example:
+     * <pre>
+     * import static TestPersonDTO_I.*;
+     *
+     * Document_Update.updateDocument(mDoc)
+     *     .from(person, $name, $age)  // Only copy these fields
+     *     .saveDocument();
+     * </pre>
+     *
+     * @param dataHelper the DataHelper object to read values from
+     * @param fields field objects to copy (if empty, copies all fields)
+     * @return this Document_Update instance
+     */
+    @SafeVarargs
+    public final Document_Update from(xyz.jphil.datahelper.DataHelper_I<?> dataHelper, Field_I<?, ?>... fields) {
+        String[] fieldNames = Arrays.stream(fields)
+            .map(Field_I::name)
+            .toArray(String[]::new);
+        return from(dataHelper, fieldNames);
+    }
+
+    /**
+     * Update fields directly from a DataHelper object (string-based).
+     *
+     * <p>String-based version for dynamic field selection.
+     * Example:
+     * <pre>
+     * Document_Update.updateDocument(mDoc)
+     *     .from(person, "name", "age")  // Only copy these fields
+     *     .saveDocument();
+     * </pre>
      *
      * @param dataHelper the DataHelper object to read values from
      * @param fields optional field names to copy (if empty, copies all fields)
@@ -170,13 +180,7 @@ public class Document_Update {
         return this;
     }
 
-    /**
-     * Update a single field with a value from a Supplier.
-     *
-     * @param field the field name
-     * @param valueProvider supplier of the field value
-     * @return this Document_Update instance
-     */
+    // String-based version with Supplier (for error handling)
     public Document_Update __(String field, Supplier<?> valueProvider) {
         assert valueProvider != null;
         assert field != null;
@@ -199,19 +203,221 @@ public class Document_Update {
         return this;
     }
 
+    // String-based version with direct value (convenience)
+    public Document_Update __(String field, Object value) {
+        return __(field, () -> value);
+    }
+
+    // Type-safe Field_I with Supplier
+    public <T> Document_Update __(xyz.jphil.datahelper.Field_I<?, T> field, Supplier<T> valueProvider) {
+        return __(field.name(), valueProvider);
+    }
+
+    // Type-safe Field_I with direct value
+    public <T> Document_Update __(xyz.jphil.datahelper.Field_I<?, T> field, T value) {
+        return __(field.name(), () -> value);
+    }
+
     /**
      * Set a field value on the document.
+     * Handles embedded DataHelper objects, Lists, and Maps by converting them appropriately.
      *
      * @param field the field name
      * @param val the value to set
      */
     private void set(String field, Object val) {
         var mySchema = mdoc.getDatabase().getSchema().getType(mdoc.getTypeName());
-        if (mySchema.getProperty(field).getType() == Type.EMBEDDED) {
-            throw new UnsupportedOperationException("We are currently not supporting embedded class fields");
+        var property = mySchema.getProperty(field);
+
+        if (property == null) {
+            // Property not defined in schema, set as-is
+            mdoc.set(field, val);
+            return;
+        }
+
+        Type fieldType = property.getType();
+
+        if (fieldType == Type.EMBEDDED) {
+            // Handle embedded DataHelper object
+            if (val instanceof DataHelper_I) {
+                DataHelper_I<?> dataHelper = (DataHelper_I<?>) val;
+                String embeddedTypeName = dataHelper.dataClass().getSimpleName();
+
+                // Create embedded document and populate it
+                MutableEmbeddedDocument embeddedDoc = mdoc.newEmbeddedDocument(embeddedTypeName, field);
+                populateEmbeddedDocument(embeddedDoc, dataHelper);
+            } else if (val instanceof Map) {
+                // Already a map, set directly
+                mdoc.set(field, val);
+            } else if (val == null) {
+                mdoc.set(field, null);
+            } else {
+                throw new IllegalArgumentException("Expected DataHelper_I or Map for EMBEDDED field " + field +
+                    ", got " + val.getClass().getName());
+            }
+
+        } else if (fieldType == Type.LIST) {
+            // Handle list (may contain embedded objects)
+            if (val instanceof List) {
+                List<?> list = (List<?>) val;
+                List<Object> convertedList = new ArrayList<>();
+
+                for (Object item : list) {
+                    if (item instanceof DataHelper_I) {
+                        // Convert DataHelper to Map
+                        convertedList.add(dataHelperToMap((DataHelper_I<?>) item));
+                    } else {
+                        convertedList.add(item);
+                    }
+                }
+
+                mdoc.set(field, convertedList);
+            } else {
+                mdoc.set(field, val);
+            }
+
+        } else if (fieldType == Type.MAP) {
+            // Handle map (values may be embedded objects)
+            if (val instanceof Map) {
+                Map<?, ?> map = (Map<?, ?>) val;
+                Map<Object, Object> convertedMap = new HashMap<>();
+
+                for (Map.Entry<?, ?> entry : map.entrySet()) {
+                    Object value = entry.getValue();
+                    if (value instanceof DataHelper_I) {
+                        // Convert DataHelper to Map
+                        convertedMap.put(entry.getKey(), dataHelperToMap((DataHelper_I<?>) value));
+                    } else {
+                        convertedMap.put(entry.getKey(), value);
+                    }
+                }
+
+                mdoc.set(field, convertedMap);
+            } else {
+                mdoc.set(field, val);
+            }
+
         } else {
+            // Regular field, set as-is
             mdoc.set(field, val);
         }
+    }
+
+    /**
+     * Populate an EmbeddedDocument from a DataHelper_I object.
+     *
+     * @param embeddedDoc the embedded document to populate
+     * @param dataHelper the source DataHelper object
+     */
+    private void populateEmbeddedDocument(MutableEmbeddedDocument embeddedDoc, DataHelper_I<?> dataHelper) {
+        for (String fieldName : dataHelper.fieldNames()) {
+            Object value = dataHelper.getPropertyByName(fieldName);
+            if (value == null) {
+                continue;
+            }
+
+            if (dataHelper.isNestedObjectField(fieldName) && value instanceof DataHelper_I) {
+                // Nested embedded object
+                DataHelper_I<?> nested = (DataHelper_I<?>) value;
+                String nestedTypeName = nested.dataClass().getSimpleName();
+                MutableEmbeddedDocument nestedDoc = embeddedDoc.newEmbeddedDocument(nestedTypeName, fieldName);
+                populateEmbeddedDocument(nestedDoc, nested);
+
+            } else if (dataHelper.isListField(fieldName) && value instanceof List) {
+                // List field
+                List<?> list = (List<?>) value;
+                List<Object> convertedList = new ArrayList<>();
+
+                for (Object item : list) {
+                    if (item instanceof DataHelper_I) {
+                        convertedList.add(dataHelperToMap((DataHelper_I<?>) item));
+                    } else {
+                        convertedList.add(item);
+                    }
+                }
+
+                embeddedDoc.set(fieldName, convertedList);
+
+            } else if (dataHelper.isMapField(fieldName) && value instanceof Map) {
+                // Map field
+                Map<?, ?> map = (Map<?, ?>) value;
+                Map<Object, Object> convertedMap = new HashMap<>();
+
+                for (Map.Entry<?, ?> entry : map.entrySet()) {
+                    Object mapValue = entry.getValue();
+                    if (mapValue instanceof DataHelper_I) {
+                        convertedMap.put(entry.getKey(), dataHelperToMap((DataHelper_I<?>) mapValue));
+                    } else {
+                        convertedMap.put(entry.getKey(), mapValue);
+                    }
+                }
+
+                embeddedDoc.set(fieldName, convertedMap);
+
+            } else {
+                // Regular field
+                embeddedDoc.set(fieldName, value);
+            }
+        }
+    }
+
+    /**
+     * Convert a DataHelper_I object to a Map for serialization.
+     *
+     * @param dataHelper the DataHelper object
+     * @return a Map representation
+     */
+    private Map<String, Object> dataHelperToMap(DataHelper_I<?> dataHelper) {
+        Map<String, Object> map = new HashMap<>();
+
+        for (String fieldName : dataHelper.fieldNames()) {
+            Object value = dataHelper.getPropertyByName(fieldName);
+            if (value == null) {
+                continue;
+            }
+
+            if (dataHelper.isNestedObjectField(fieldName) && value instanceof DataHelper_I) {
+                // Recursively convert nested object
+                map.put(fieldName, dataHelperToMap((DataHelper_I<?>) value));
+
+            } else if (dataHelper.isListField(fieldName) && value instanceof List) {
+                // Convert list elements
+                List<?> list = (List<?>) value;
+                List<Object> convertedList = new ArrayList<>();
+
+                for (Object item : list) {
+                    if (item instanceof DataHelper_I) {
+                        convertedList.add(dataHelperToMap((DataHelper_I<?>) item));
+                    } else {
+                        convertedList.add(item);
+                    }
+                }
+
+                map.put(fieldName, convertedList);
+
+            } else if (dataHelper.isMapField(fieldName) && value instanceof Map) {
+                // Convert map values
+                Map<?, ?> sourceMap = (Map<?, ?>) value;
+                Map<Object, Object> convertedMap = new HashMap<>();
+
+                for (Map.Entry<?, ?> entry : sourceMap.entrySet()) {
+                    Object mapValue = entry.getValue();
+                    if (mapValue instanceof DataHelper_I) {
+                        convertedMap.put(entry.getKey(), dataHelperToMap((DataHelper_I<?>) mapValue));
+                    } else {
+                        convertedMap.put(entry.getKey(), mapValue);
+                    }
+                }
+
+                map.put(fieldName, convertedMap);
+
+            } else {
+                // Regular field
+                map.put(fieldName, value);
+            }
+        }
+
+        return map;
     }
 
     /**

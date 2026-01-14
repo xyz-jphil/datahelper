@@ -8,18 +8,7 @@ import java.util.HashMap;
 import java.util.function.Consumer;
 
 /**
- * Fluent API for upserting (update or insert) documents in ArcadeDB.
- * Provides a clean interface for common CRUD patterns.
- *
- * <p>Example usage:
- * <pre>
- * Update.use(database)
- *     .select("Person")
- *     .whereEq("email", "john@example.com")
- *     .upsert()
- *     .mapValuesWith(personMap)
- *     .saveDocument();
- * </pre>
+ * Fluent API for upserting documents in ArcadeDB.
  */
 public class Update {
 
@@ -31,76 +20,41 @@ public class Update {
         this.database = database;
     }
 
-    /**
-     * Static factory method to create an Update instance.
-     *
-     * @param database the database instance
-     * @return new Update instance
-     */
     public static Update use(Database database) {
         return new Update(database);
     }
 
-    /**
-     * Select the document type to operate on.
-     *
-     * @param typeName the document type name
-     * @return this Update instance
-     */
     public Update select(String typeName) {
         this.typeName = typeName;
         return this;
     }
 
-    /**
-     * Add a where condition (equality check).
-     *
-     * @param key the field name
-     * @param value the value to match
-     * @return this Update instance
-     */
+    // String-based version
     public Update whereEq(String key, Object value) {
         lookupBy.put(key, value);
         return this;
     }
 
-    /**
-     * Perform an upsert operation (update if exists, insert if not).
-     *
-     * @return Document_Update for fluent field updates
-     */
+    // Type-safe Field_I version
+    public <T> Update whereEq(xyz.jphil.datahelper.Field_I<?, T> field, T value) {
+        lookupBy.put(field.name(), value);
+        return this;
+    }
+
     public Document_Update upsert() {
         return upsert(null);
     }
 
-    /**
-     * Perform an upsert operation with callback to know if document already existed.
-     *
-     * @param alreadyExists callback receiving true if document existed, false if new
-     * @return Document_Update for fluent field updates
-     */
     public Document_Update upsert(Consumer<Boolean> alreadyExists) {
         var mDoc = impl(alreadyExists);
         return Document_Update.updateDocument(mDoc);
     }
 
-    /**
-     * Get a document for update only if it already exists (don't create new).
-     *
-     * @param alreadyExists callback receiving true if document existed, false if new
-     * @return Document_Update configured not to save if document is new
-     */
     public Document_Update updateNewOnly(Consumer<Boolean> alreadyExists) {
         var mDoc = impl(alreadyExists);
         return new Document_Update(mDoc, true);
     }
 
-    /**
-     * Implementation of the upsert logic.
-     *
-     * @param alreadyExists optional callback
-     * @return MutableDocument ready for updates
-     */
     public MutableDocument impl(Consumer<Boolean> alreadyExists) {
         var keys = new ArrayList<String>();
         var vals = new ArrayList<Object>();
