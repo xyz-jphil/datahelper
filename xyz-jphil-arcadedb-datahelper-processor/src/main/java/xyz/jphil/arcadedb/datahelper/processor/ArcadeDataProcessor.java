@@ -251,11 +251,12 @@ public class ArcadeDataProcessor extends AbstractProcessor {
         CodeGeneratorUtils.addMapMethods(classBuilder, fields);
 
         // 15. Static factory method: of(Document)
+        ClassName entityClassName = ClassName.get(packageName, className);
         MethodSpec ofMethod = MethodSpec.methodBuilder("of")
                 .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
                 .addParameter(ClassName.get("com.arcadedb.database", "Document"), "doc")
-                .returns(className)
-                .addStatement("var instance = new $T()", className)
+                .returns(entityClassName)
+                .addStatement("var instance = new $T()", entityClassName)
                 .addStatement("return instance.fromArcadeDocument(doc)")
                 .build();
         classBuilder.addMethod(ofMethod);
