@@ -221,34 +221,34 @@ public class ArcadeDataProcessor extends AbstractProcessor {
 
         // ========== DataHelper_I Methods (15 property accessor methods) ==========
         // 0. dataClass()
-        classBuilder.addMethod(CodeGeneratorUtils.createDataClassMethod(packageName, className));
+        classBuilder.addMethod(CodeGeneratorUtils.createDataClassMethod(packageName, className, false));
 
         // 1. fieldNames()
-        classBuilder.addMethod(CodeGeneratorUtils.createFieldNamesMethod());
+        classBuilder.addMethod(CodeGeneratorUtils.createFieldNamesMethod(false));
 
         // 2. getPropertyByName(String)
-        classBuilder.addMethod(CodeGeneratorUtils.createGetPropertyByNameMethod(fields, utils));
+        classBuilder.addMethod(CodeGeneratorUtils.createGetPropertyByNameMethod(fields, utils, false));
 
         // 3. setPropertyByName(String, Object)
-        classBuilder.addMethod(CodeGeneratorUtils.createSetPropertyByNameMethod(fields, utils));
+        classBuilder.addMethod(CodeGeneratorUtils.createSetPropertyByNameMethod(fields, utils, false));
 
         // 4. getPropertyType(String)
-        classBuilder.addMethod(CodeGeneratorUtils.createGetPropertyTypeMethod(fields));
+        classBuilder.addMethod(CodeGeneratorUtils.createGetPropertyTypeMethod(fields, false));
 
         // 5. createNestedObject(String)
-        classBuilder.addMethod(CodeGeneratorUtils.createNestedObjectMethod(fields));
+        classBuilder.addMethod(CodeGeneratorUtils.createNestedObjectMethod(fields, false));
 
         // 6. createListElement(String)
-        classBuilder.addMethod(CodeGeneratorUtils.createListElementMethod(fields));
+        classBuilder.addMethod(CodeGeneratorUtils.createListElementMethod(fields, false));
 
         // 7. isListField(String)
-        classBuilder.addMethod(CodeGeneratorUtils.createIsListFieldMethod(fields));
+        classBuilder.addMethod(CodeGeneratorUtils.createIsListFieldMethod(fields, false));
 
         // 8. isNestedObjectField(String)
-        classBuilder.addMethod(CodeGeneratorUtils.createIsNestedObjectFieldMethod(fields));
+        classBuilder.addMethod(CodeGeneratorUtils.createIsNestedObjectFieldMethod(fields, false));
 
         // 9-14. Map support methods
-        CodeGeneratorUtils.addMapMethods(classBuilder, fields);
+        CodeGeneratorUtils.addMapMethods(classBuilder, fields, false);
 
         // 15. Static factory method: of(Document)
         ClassName entityClassName = ClassName.get(packageName, className);
