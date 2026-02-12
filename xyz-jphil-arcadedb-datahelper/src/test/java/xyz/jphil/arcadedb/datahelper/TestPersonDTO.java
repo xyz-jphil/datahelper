@@ -1,4 +1,4 @@
-    package xyz.jphil.arcadedb.datahelper;
+package xyz.jphil.arcadedb.datahelper;
 
 import lombok.Data;
 import static xyz.jphil.arcadedb.datahelper.SchemaBuilder.defType;
